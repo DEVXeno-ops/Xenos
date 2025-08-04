@@ -5,19 +5,21 @@ branches:
     - master
 
 image: Visual Studio 2017
+
 clone_folder: c:\projects\xenos
 
-platform: 
+platform:
   - Win32
   - x64
 
-configuration: 
+configuration:
   - Debug
   - Release
-  
+
 install:
-  - cmd: git submodule update --init --recursive
- 
+  - git submodule update --init --recursive
+
 build:
-  parallel: true
   project: Xenos.sln
+  parallel: true
+  verbosity: minimal
