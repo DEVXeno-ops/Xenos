@@ -4,160 +4,102 @@
 #include <cstdarg>
 #include <ctime>
 #include <cstdio>
+#include <mutex>
 
-namespace xlog
-{
+namespace xlog {
 
-namespace LogLevel
-{
-    enum e
-    {
+namespace LogLevel {
+    enum e {
         fatal = 0,
         error,
         critical,
         warning,
         normal,
-        verbose
+        verbose,
+        count // Not a log level; used for bounds check
     };
 }
 
-static const char* sLogLevel[] = { "*FATAL*", "*ERROR*", "*CRITICAL*", "*WARNING*", "*NORMAL*", "*VERBOSE*" };
+static const char* sLogLevel[] = {
+    "*FATAL*",
+    "*ERROR*",
+    "*CRITICAL*",
+    "*WARNING*",
+    "*NORMAL*",
+    "*VERBOSE*"
+};
 
-/// <summary>
-/// Primitive log subsystem
-/// </summary>
-class Logger
-{
+class Logger {
 public:
-    ~Logger()
-    {
-        _output << std::endl;
+    ~Logger() {
+        if (_output.is_open()) {
+            _output << std::endl;
+            _output.close();
+        }
     }
 
-    static Logger& Instance()
-    {
-        static Logger log;
-        return log;
+    static Logger& Instance() {
+        static Logger instance;
+        return instance;
     }
 
-    bool DoLog( LogLevel::e level, const char* fmt, ... )
-    {
-        va_list alist;
-        bool result = false;
-
-        va_start( alist, fmt );
-        result = DoLogV( level, fmt, alist );
-        va_end( alist );
-
+    bool DoLog(LogLevel::e level, const char* fmt, ...) {
+        va_list args;
+        va_start(args, fmt);
+        bool result = DoLogV(level, fmt, args);
+        va_end(args);
         return result;
     }
 
-    bool DoLogV( LogLevel::e level, const char* fmt, va_list vargs )
-    {
-        char varbuf[2048] = { 0 };
-        char message[4096] = { 0 };
-        char timebuf[256] = { 0 };
+    bool DoLogV(LogLevel::e level, const char* fmt, va_list args) {
+        if (!_output.is_open() || level < 0 || level >= LogLevel::count)
+            return false;
 
-        // Format message time
-        auto t = std::time( nullptr );
-        tm stm;
-        localtime_s( &stm, &t );
-        std::strftime( timebuf, _countof( timebuf ), "%Y-%m-%d %H:%M:%S", &stm );
+        std::lock_guard<std::mutex> lock(_mutex);
 
-        // Format messages
-        vsprintf_s( varbuf, _countof( varbuf ), fmt, vargs );
-        sprintf_s( message, _countof( message ), "%s %-12s %s", timebuf, sLogLevel[level], varbuf );
+        char varbuf[2048] = {};
+        char message[4096] = {};
+        char timebuf[64] = {};
+
+        std::time_t now = std::time(nullptr);
+        std::tm stm{};
+        localtime_s(&stm, &now);
+        std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &stm);
+
+        vsnprintf(varbuf, sizeof(varbuf), fmt, args);
+        snprintf(message, sizeof(message), "%s %-10s %s", timebuf, sLogLevel[level], varbuf);
 
         _output << message << std::endl;
-
         return true;
     }
 
 private:
-    Logger()
-    {
-        _output.open( "Xenos.log", std::ios::out | std::ios::app );
+    Logger() {
+        _output.open("Xenos.log", std::ios::out | std::ios::app);
     }
 
-    Logger( const Logger& ) = delete;
-    Logger& operator = (const Logger&) = delete;
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
 
-private:
     std::ofstream _output;
+    std::mutex _mutex;
 };
 
-
-inline bool Fatal( const char* fmt, ... )
-{
-    va_list alist;
-    bool result = false;
-
-    va_start( alist, fmt );
-    result = Logger::Instance().DoLogV( LogLevel::fatal, fmt, alist );
-    va_end( alist );
-
-    return result;
+// Inline helper macros
+#define DEFINE_LOG_FN(name, level)                      \
+inline bool name(const char* fmt, ...) {                \
+    va_list args;                                       \
+    va_start(args, fmt);                                \
+    bool result = Logger::Instance().DoLogV(level, fmt, args); \
+    va_end(args);                                       \
+    return result;                                      \
 }
 
-inline bool Error( const char* fmt, ... )
-{
-    va_list alist;
-    bool result = false;
+DEFINE_LOG_FN(Fatal,    LogLevel::fatal)
+DEFINE_LOG_FN(Error,    LogLevel::error)
+DEFINE_LOG_FN(Critical, LogLevel::critical)
+DEFINE_LOG_FN(Warning,  LogLevel::warning)
+DEFINE_LOG_FN(Normal,   LogLevel::normal)
+DEFINE_LOG_FN(Verbose,  LogLevel::verbose)
 
-    va_start( alist, fmt );
-    result = Logger::Instance().DoLogV( LogLevel::error, fmt, alist );
-    va_end( alist );
-
-    return result;
-}
-
-inline bool Critical( const char* fmt, ... )
-{
-    va_list alist;
-    bool result = false;
-
-    va_start( alist, fmt );
-    result = Logger::Instance().DoLogV( LogLevel::critical, fmt, alist );
-    va_end( alist );
-
-    return result;
-}
-
-
-inline bool Warning( const char* fmt, ... )
-{
-    va_list alist;
-    bool result = false;
-
-    va_start( alist, fmt );
-    result = Logger::Instance().DoLogV( LogLevel::warning, fmt, alist );
-    va_end( alist );
-
-    return result;
-}
-
-inline bool Normal( const char* fmt, ... )
-{
-    va_list alist;
-    bool result = false;
-
-    va_start( alist, fmt );
-    result = Logger::Instance().DoLogV( LogLevel::normal, fmt, alist );
-    va_end( alist );
-
-    return result;
-}
-
-inline bool Verbose( const char* fmt, ... )
-{
-    va_list alist;
-    bool result = false;
-
-    va_start( alist, fmt );
-    result = Logger::Instance().DoLogV( LogLevel::verbose, fmt, alist );
-    va_end( alist );
-
-    return result;
-}
-
-}
+} // namespace xlog
